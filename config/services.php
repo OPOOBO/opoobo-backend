@@ -40,4 +40,10 @@ return [
         'secret_key' => env('FLW_SECRET_KEY'),
     ],
 
+    'ai' => [
+        'api_key' => env('AI_API_KEY'),
+        'base_url' => env('AI_BASE_URL', 'https://api.openai.com/v1'),
+        'model' => env('AI_MODEL', 'gpt-4o-mini'),
+    ],
+
 ];

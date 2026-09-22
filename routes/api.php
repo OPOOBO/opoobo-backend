@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\V1\AddressController;
+use App\Http\Controllers\Api\V1\AiAssistantController;
 use App\Http\Controllers\Api\V1\AuthController;
 use App\Http\Controllers\Api\V1\FlutterwaveController;
 use App\Http\Controllers\Api\V1\MarketProxyController;
@@ -55,6 +56,9 @@ Route::prefix('v1')->group(function () {
 
         // Dashboard Stats
         Route::get('/user/stats', [StatsController::class, 'index']);
+
+        // AI Assistant
+        Route::post('/ai/chat', [AiAssistantController::class, 'chat']);
 
         // Market Proxy (public) — accept GET + POST so mobile
         // clients can use either verb; proxy forwards correctly upstream.
