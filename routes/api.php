@@ -3,10 +3,12 @@
 use App\Http\Controllers\Api\V1\AddressController;
 use App\Http\Controllers\Api\V1\AiAssistantController;
 use App\Http\Controllers\Api\V1\AuthController;
+use App\Http\Controllers\Api\V1\DealController;
 use App\Http\Controllers\Api\V1\FlutterwaveController;
 use App\Http\Controllers\Api\V1\MarketProxyController;
 use App\Http\Controllers\Api\V1\ModuleController;
 use App\Http\Controllers\Api\V1\PaymentMethodController;
+use App\Http\Controllers\Api\V1\RewardsController;
 use App\Http\Controllers\Api\V1\SavedLocationController;
 use App\Http\Controllers\Api\V1\SecurityController;
 use App\Http\Controllers\Api\V1\StatsController;
@@ -59,6 +61,11 @@ Route::prefix('v1')->group(function () {
 
         // AI Assistant
         Route::post('/ai/chat', [AiAssistantController::class, 'chat']);
+        Route::post('/ai/scan', [AiAssistantController::class, 'scan']);
+
+        // Placeholder catalogue. Redemption and point accrual are not implemented.
+        Route::get('/deals', [DealController::class, 'index']);
+        Route::get('/rewards', [RewardsController::class, 'index']);
 
         // Market Proxy (public) — accept GET + POST so mobile
         // clients can use either verb; proxy forwards correctly upstream.

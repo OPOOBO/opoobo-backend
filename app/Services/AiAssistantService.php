@@ -242,4 +242,90 @@ PROMPT;
 
         return array_values($normalized);
     }
+
+    /**
+     * Identify a product photo. Returns null when the provider is missing or fails.
+     * Does not invent a price.
+     *
+     * @return array{name: string, description: string, price_note: string}|null
+     */
+    public function describeProduct(string $binary, string $mime): ?array
+    {
+        if (! $this->hasProviderConfig()) {
+            return null;
+        }
+
+        $baseUrl = rtrim((string) config('services.ai.base_url'), '/');
+        $model = (string) config('services.ai.model');
+        $apiKey = (string) config('services.ai.api_key');
+        $dataUrl = 'data:'.$mime.';base64,'.base64_encode($binary);
+
+        try {
+            $response = Http::withToken($apiKey)
+                ->timeout(45)
+                ->acceptJson()
+                ->post($baseUrl.'/chat/completions', [
+                    'model' => $model,
+                    'temperature' => 0.2,
+                    'response_format' => ['type' => 'json_object'],
+                    'messages' => [
+                        [
+                            'role' => 'system',
+                            'content' => 'You identify consumer products from a photo for the OPOOBO app. Respond with JSON only: {"name":"string","description":"string","price_note":"string"}. Describe what is visible. If a price is not visible or you cannot support one, set price_note to "Pricing unavailable". Do not invent a specific price.',
+                        ],
+                        [
+                            'role' => 'user',
+                            'content' => [
+                                [
+                                    'type' => 'text',
+                                    'text' => 'What product is this, and what can you say about pricing?',
+                                ],
+                                [
+                                    'type' => 'image_url',
+                                    'image_url' => ['url' => $dataUrl],
+                                ],
+                            ],
+                        ],
+                    ],
+                ]);
+        } catch (\Throwable $e) {
+            Log::warning('Product scan provider call failed', [
+                'error' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
+
+        if (! $response->successful()) {
+            Log::warning('Product scan provider returned non-success status', [
+                'status' => $response->status(),
+            ]);
+
+            return null;
+        }
+
+        $content = data_get($response->json(), 'choices.0.message.content');
+        if (! is_string($content) || $content === '') {
+            return null;
+        }
+
+        $decoded = json_decode($content, true);
+        if (! is_array($decoded)) {
+            return null;
+        }
+
+        $name = trim((string) ($decoded['name'] ?? ''));
+        $description = trim((string) ($decoded['description'] ?? ''));
+        $priceNote = trim((string) ($decoded['price_note'] ?? ''));
+
+        if ($name === '' && $description === '') {
+            return null;
+        }
+
+        return [
+            'name' => $name !== '' ? $name : 'Product',
+            'description' => $description,
+            'price_note' => $priceNote !== '' ? $priceNote : 'Pricing unavailable',
+        ];
+    }
 }
