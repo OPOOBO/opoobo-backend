@@ -39,6 +39,11 @@
           <a href="{{ $isAdmin ? route('admin.dashboard') : ($isLoggedIn ? route('developer.dashboard') : '/') }}" class="text-brand-500 font-bold text-lg tracking-tight">OPOOBO</a>
           <span class="text-gray-300">/</span>
           <span class="text-gray-600 text-sm font-semibold">@yield('nav-title', 'Portal')</span>
+          @if($isAdmin && $isOnAdminPage)
+            <span class="text-gray-300">/</span>
+            <a href="{{ route('admin.dashboard') }}" class="text-sm font-semibold {{ request()->routeIs('admin.dashboard') ? 'text-brand-600' : 'text-gray-500 hover:text-gray-800' }}">Store</a>
+            <a href="{{ route('admin.assistant') }}" class="text-sm font-semibold {{ request()->routeIs('admin.assistant') ? 'text-brand-600' : 'text-gray-500 hover:text-gray-800' }}">AI Assistant</a>
+          @endif
         </div>
 
         <div class="flex items-center gap-3">

@@ -10,7 +10,8 @@
         "firebase/php-jwt": "^7.1",
         "laravel/framework": "^12.0",
         "laravel/sanctum": "^4.0",
-        "laravel/tinker": "^2.10"
+        "laravel/tinker": "^2.10",
+        "smalot/pdfparser": "^2.12"
     },
     "require-dev": {
         "fakerphp/faker": "^1.23",

@@ -38,6 +38,13 @@ return [
             'report' => false,
         ],
 
+        'knowledgebase' => [
+            'driver' => 'local',
+            'root' => storage_path('app/knowledgebase'),
+            'throw' => false,
+            'report' => false,
+        ],
+
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),

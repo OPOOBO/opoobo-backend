@@ -2,77 +2,219 @@
 
 namespace App\Services;
 
-use App\Models\Module;
-use Illuminate\Support\Collection;
+use App\Models\AiProvider;
+use App\Models\KnowledgebaseFile;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
 class AiAssistantService
 {
+    private const NOT_COVERED = 'The knowledgebase does not cover that question.';
+
+    private const PASSAGE_LIMIT = 4000;
+
     /**
-     * Answer a chat turn grounded in the active module catalogue.
+     * Answer a chat turn from active knowledgebase files.
      *
      * @param  array<int, array{role: string, content: string}>  $messages
      * @return array{reply: string, actions: array<int, array<string, string>>}
      */
     public function chat(array $messages): array
     {
-        $modules = Module::query()
-            ->where('is_active', true)
-            ->orderBy('sort_order')
-            ->get(['name', 'display_name', 'description']);
-
-        if ($this->hasProviderConfig()) {
-            try {
-                $result = $this->callProvider($messages, $modules);
-                if ($result !== null) {
-                    return $result;
-                }
-            } catch (\Throwable $e) {
-                Log::warning('AI provider call failed, using local fallback', [
-                    'error' => $e->getMessage(),
-                ]);
-            }
+        $query = $this->latestUserText($messages);
+        if ($query === '') {
+            return [
+                'reply' => 'Ask a question and I will answer from the OPOOBO knowledgebase.',
+                'actions' => [],
+            ];
         }
 
-        return $this->localFallback($messages, $modules);
-    }
+        $passages = $this->passagesFor($query);
+        if ($passages['best'] === '') {
+            return [
+                'reply' => self::NOT_COVERED,
+                'actions' => [],
+            ];
+        }
 
-    private function hasProviderConfig(): bool
-    {
-        return filled(config('services.ai.api_key'));
+        $provider = $this->resolveChatProvider();
+        if ($provider === null) {
+            return [
+                'reply' => $passages['best'],
+                'actions' => [],
+            ];
+        }
+
+        try {
+            $reply = $this->callKnowledgeProvider($messages, $passages['text'], $provider);
+            if (is_string($reply) && $reply !== '') {
+                return [
+                    'reply' => $reply,
+                    'actions' => [],
+                ];
+            }
+        } catch (\Throwable $e) {
+            Log::warning('AI provider call failed, returning knowledgebase passage', [
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        return [
+            'reply' => $passages['best'],
+            'actions' => [],
+        ];
     }
 
     /**
      * @param  array<int, array{role: string, content: string}>  $messages
-     * @param  Collection<int, Module>  $modules
-     * @return array{reply: string, actions: array<int, array<string, string>>}|null
      */
-    private function callProvider(array $messages, Collection $modules): ?array
+    private function latestUserText(array $messages): string
     {
-        $baseUrl = rtrim((string) config('services.ai.base_url'), '/');
-        $model = (string) config('services.ai.model');
-        $apiKey = (string) config('services.ai.api_key');
+        for ($i = count($messages) - 1; $i >= 0; $i--) {
+            if (($messages[$i]['role'] ?? '') === 'user') {
+                return trim((string) $messages[$i]['content']);
+            }
+        }
 
-        $catalogue = $modules->map(fn (Module $m) => [
-            'name' => $m->name,
-            'displayName' => $m->display_name,
-            'description' => $m->description,
-        ])->values()->all();
+        return '';
+    }
 
+    /**
+     * @return array{text: string, best: string}
+     */
+    private function passagesFor(string $query): array
+    {
+        $tokens = $this->tokens($query);
+        if ($tokens === []) {
+            return ['text' => '', 'best' => ''];
+        }
+
+        $ranked = [];
+        $files = KnowledgebaseFile::query()->where('is_active', true)->get();
+
+        foreach ($files as $file) {
+            $body = (string) $file->body;
+            $haystack = mb_strtolower($body);
+            $score = 0;
+            $position = null;
+
+            foreach ($tokens as $token) {
+                $found = mb_strpos($haystack, $token);
+                if ($found === false) {
+                    continue;
+                }
+                $score++;
+                if ($position === null || $found < $position) {
+                    $position = $found;
+                }
+            }
+
+            if ($score === 0 || $position === null) {
+                continue;
+            }
+
+            $ranked[] = [
+                'score' => $score,
+                'excerpt' => $this->excerpt($body, $position),
+            ];
+        }
+
+        if ($ranked === []) {
+            return ['text' => '', 'best' => ''];
+        }
+
+        usort($ranked, fn (array $a, array $b) => $b['score'] <=> $a['score']);
+
+        $best = $ranked[0]['excerpt'];
+        $text = '';
+        foreach ($ranked as $item) {
+            $next = $text === '' ? $item['excerpt'] : $text."\n\n".$item['excerpt'];
+            if (mb_strlen($next) > self::PASSAGE_LIMIT) {
+                break;
+            }
+            $text = $next;
+        }
+
+        if ($text === '') {
+            $text = mb_substr($best, 0, self::PASSAGE_LIMIT);
+        }
+
+        return ['text' => $text, 'best' => $best];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function tokens(string $query): array
+    {
+        $parts = preg_split('/[^\p{L}\p{N}]+/u', mb_strtolower($query)) ?: [];
+        $tokens = [];
+
+        foreach ($parts as $part) {
+            if (mb_strlen($part) < 3) {
+                continue;
+            }
+            $tokens[$part] = true;
+            if (count($tokens) >= 12) {
+                break;
+            }
+        }
+
+        return array_keys($tokens);
+    }
+
+    private function excerpt(string $body, int $position): string
+    {
+        $start = max(0, $position - 200);
+
+        return trim(mb_substr($body, $start, 1200));
+    }
+
+    /**
+     * Enabled admin provider, or the env provider when none is enabled.
+     *
+     * @return array{base_url: string, model: string, api_key: string}|null
+     */
+    private function resolveChatProvider(): ?array
+    {
+        $row = AiProvider::query()
+            ->where('is_enabled', true)
+            ->orderBy('sort_order')
+            ->orderBy('id')
+            ->first();
+
+        if ($row !== null && filled($row->api_key)) {
+            return [
+                'base_url' => rtrim($row->base_url, '/'),
+                'model' => $row->model,
+                'api_key' => (string) $row->api_key,
+            ];
+        }
+
+        if (filled(config('services.ai.api_key'))) {
+            return [
+                'base_url' => rtrim((string) config('services.ai.base_url'), '/'),
+                'model' => (string) config('services.ai.model'),
+                'api_key' => (string) config('services.ai.api_key'),
+            ];
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<int, array{role: string, content: string}>  $messages
+     * @param  array{base_url: string, model: string, api_key: string}  $provider
+     */
+    private function callKnowledgeProvider(array $messages, string $passages, array $provider): ?string
+    {
         $system = <<<PROMPT
-You are Ask OPOOBO, the in-app assistant for the OPOOBO super app.
-Help users find services (modules), explain what each module does, and answer app questions.
-Available modules (JSON):
-PROMPT
-            .json_encode($catalogue, JSON_UNESCAPED_UNICODE);
+You are Ask OPOOBO. Answer the user's question using only the knowledgebase passages below.
+If the passages do not contain the answer, say the knowledgebase does not cover that question.
+Do not invent facts. Respond with a single JSON object and no markdown: {"reply":"string"}
 
-        $system .= <<<'PROMPT'
-
-Respond with a single JSON object only (no markdown), shape:
-{"reply":"string","actions":[{"type":"open_module","moduleName":"bus","label":"Open Bus"}]}
-Use action type "open_module" with a real module name from the catalogue, or "open_search" with a "query" field.
-Omit actions when none are useful. Keep replies concise and helpful.
+Knowledgebase passages:
+{$passages}
 PROMPT;
 
         $payloadMessages = [
@@ -80,167 +222,50 @@ PROMPT;
         ];
 
         foreach ($messages as $message) {
-            $role = $message['role'] === 'assistant' ? 'assistant' : 'user';
+            $role = ($message['role'] ?? '') === 'assistant' ? 'assistant' : 'user';
+            if (($message['role'] ?? '') === 'system') {
+                continue;
+            }
             $payloadMessages[] = [
                 'role' => $role,
-                'content' => $message['content'],
+                'content' => (string) $message['content'],
             ];
         }
 
-        $response = Http::withToken($apiKey)
+        $response = Http::withToken($provider['api_key'])
             ->timeout(30)
             ->acceptJson()
-            ->post($baseUrl.'/chat/completions', [
-                'model' => $model,
-                'messages' => $payloadMessages,
-                'temperature' => 0.4,
+            ->post($provider['base_url'].'/chat/completions', [
+                'model' => $provider['model'],
+                'temperature' => 0.2,
                 'response_format' => ['type' => 'json_object'],
+                'messages' => $payloadMessages,
             ]);
 
         if (! $response->successful()) {
             Log::warning('AI provider returned non-success status', [
                 'status' => $response->status(),
-                'body' => $response->body(),
             ]);
 
             return null;
         }
 
         $content = data_get($response->json(), 'choices.0.message.content');
-        if (! is_string($content) || $content === '') {
+        if (! is_string($content) || trim($content) === '') {
             return null;
         }
 
         $decoded = json_decode($content, true);
-        if (! is_array($decoded) || ! isset($decoded['reply']) || ! is_string($decoded['reply'])) {
-            return [
-                'reply' => trim($content),
-                'actions' => [],
-            ];
+        if (is_array($decoded) && isset($decoded['reply']) && is_string($decoded['reply']) && trim($decoded['reply']) !== '') {
+            return trim($decoded['reply']);
         }
 
-        return [
-            'reply' => $decoded['reply'],
-            'actions' => $this->normalizeActions($decoded['actions'] ?? [], $modules),
-        ];
+        return trim($content);
     }
 
-    /**
-     * @param  array<int, array{role: string, content: string}>  $messages
-     * @param  Collection<int, Module>  $modules
-     * @return array{reply: string, actions: array<int, array<string, string>>}
-     */
-    private function localFallback(array $messages, Collection $modules): array
+    private function hasProviderConfig(): bool
     {
-        $latestUser = '';
-        for ($i = count($messages) - 1; $i >= 0; $i--) {
-            if (($messages[$i]['role'] ?? '') === 'user') {
-                $latestUser = strtolower(trim((string) $messages[$i]['content']));
-                break;
-            }
-        }
-
-        if ($latestUser === '') {
-            return [
-                'reply' => 'Ask me anything about OPOOBO services — for example “Where can I book a bus?” or “Find marketplace”.',
-                'actions' => [],
-            ];
-        }
-
-        $matches = $modules->filter(function (Module $module) use ($latestUser) {
-            $haystack = strtolower(implode(' ', array_filter([
-                $module->name,
-                $module->display_name,
-                $module->description,
-            ])));
-
-            foreach (preg_split('/\s+/', $latestUser) ?: [] as $token) {
-                if (strlen($token) < 3) {
-                    continue;
-                }
-                if (str_contains($haystack, $token)) {
-                    return true;
-                }
-            }
-
-            return str_contains($haystack, $latestUser);
-        })->take(3)->values();
-
-        if ($matches->isEmpty()) {
-            $list = $modules->take(6)->map(fn (Module $m) => $m->display_name)->implode(', ');
-
-            return [
-                'reply' => $list !== ''
-                    ? "I couldn't match a specific service. Available modules include: {$list}. Try naming one, or search the store."
-                    : "I couldn't find matching services right now. Try searching in the app.",
-                'actions' => [
-                    [
-                        'type' => 'open_search',
-                        'query' => $latestUser,
-                        'label' => 'Search app',
-                    ],
-                ],
-            ];
-        }
-
-        $names = $matches->map(fn (Module $m) => $m->display_name)->implode(', ');
-        $actions = $matches->map(fn (Module $m) => [
-            'type' => 'open_module',
-            'moduleName' => $m->name,
-            'label' => 'Open '.$m->display_name,
-        ])->all();
-
-        return [
-            'reply' => "Here's what I found for you: {$names}. Tap a service below to open it.",
-            'actions' => $actions,
-        ];
-    }
-
-    /**
-     * @param  mixed  $actions
-     * @param  Collection<int, Module>  $modules
-     * @return array<int, array<string, string>>
-     */
-    private function normalizeActions(mixed $actions, Collection $modules): array
-    {
-        if (! is_array($actions)) {
-            return [];
-        }
-
-        $validNames = $modules->pluck('name')->all();
-        $normalized = [];
-
-        foreach ($actions as $action) {
-            if (! is_array($action)) {
-                continue;
-            }
-
-            $type = (string) ($action['type'] ?? '');
-            if ($type === 'open_module') {
-                $moduleName = (string) ($action['moduleName'] ?? $action['module_name'] ?? '');
-                if ($moduleName === '' || ! in_array($moduleName, $validNames, true)) {
-                    continue;
-                }
-                $label = (string) ($action['label'] ?? ('Open '.$moduleName));
-                $normalized[] = [
-                    'type' => 'open_module',
-                    'moduleName' => $moduleName,
-                    'label' => $label,
-                ];
-            } elseif ($type === 'open_search') {
-                $query = trim((string) ($action['query'] ?? ''));
-                if ($query === '') {
-                    continue;
-                }
-                $normalized[] = [
-                    'type' => 'open_search',
-                    'query' => $query,
-                    'label' => (string) ($action['label'] ?? 'Search'),
-                ];
-            }
-        }
-
-        return array_values($normalized);
+        return filled(config('services.ai.api_key'));
     }
 
     /**

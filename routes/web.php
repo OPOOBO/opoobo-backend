@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AdminAssistantController;
 use App\Http\Controllers\AdminController;
 use App\Http\Controllers\DeveloperController;
 use App\Http\Controllers\MiniAppController;
@@ -32,8 +33,12 @@ Route::prefix('developer')->group(function () {
 
     Route::middleware(DeveloperAuth::class)->group(function () {
         Route::get('/', [DeveloperController::class, 'dashboard'])->name('developer.dashboard');
-        Route::get('/docs', function () { return view('developer.docs'); })->name('developer.docs');
-        Route::get('/demo', function () { return view('developer.demo'); })->name('developer.demo');
+        Route::get('/docs', function () {
+            return view('developer.docs');
+        })->name('developer.docs');
+        Route::get('/demo', function () {
+            return view('developer.demo');
+        })->name('developer.demo');
         Route::get('/submit', [DeveloperController::class, 'showSubmit'])->name('developer.submit');
         Route::post('/submit', [DeveloperController::class, 'submit']);
         Route::get('/{module}/edit', [DeveloperController::class, 'showEdit'])->name('developer.edit');
@@ -53,6 +58,15 @@ Route::prefix('admin')->group(function () {
 
     Route::middleware(AdminAuth::class)->group(function () {
         Route::get('/', [AdminController::class, 'dashboard'])->name('admin.dashboard');
+        Route::get('/assistant', [AdminAssistantController::class, 'index'])->name('admin.assistant');
+        Route::post('/assistant/files', [AdminAssistantController::class, 'storeFile'])->name('admin.assistant.files.store');
+        Route::post('/assistant/files/{file}/replace', [AdminAssistantController::class, 'replaceFile'])->name('admin.assistant.files.replace');
+        Route::post('/assistant/files/{file}/active', [AdminAssistantController::class, 'toggleFile'])->name('admin.assistant.files.active');
+        Route::delete('/assistant/files/{file}', [AdminAssistantController::class, 'destroyFile'])->name('admin.assistant.files.destroy');
+        Route::post('/assistant/providers', [AdminAssistantController::class, 'storeProvider'])->name('admin.assistant.providers.store');
+        Route::post('/assistant/providers/{provider}', [AdminAssistantController::class, 'updateProvider'])->name('admin.assistant.providers.update');
+        Route::delete('/assistant/providers/{provider}', [AdminAssistantController::class, 'destroyProvider'])->name('admin.assistant.providers.destroy');
+        Route::post('/assistant/providers/{provider}/test', [AdminAssistantController::class, 'testProvider'])->name('admin.assistant.providers.test');
         Route::get('/profile', [AdminController::class, 'profile'])->name('admin.profile');
         Route::post('/approve/{module}', [AdminController::class, 'approve'])->name('admin.approve');
         Route::post('/reject/{module}', [AdminController::class, 'reject'])->name('admin.reject');

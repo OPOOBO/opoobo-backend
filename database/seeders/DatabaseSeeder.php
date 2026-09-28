@@ -26,7 +26,7 @@ class DatabaseSeeder extends Seeder
         ]);
 
         // Remove modules no longer part of the ecosystem
-        Module::whereNotIn('name', ['bus', 'market', 'go', 'mall'])->delete();
+        Module::whereNotIn('name', ['bus', 'market', 'go', 'mall', 'ai'])->delete();
 
         // Seed modules
         Module::updateOrCreate(
@@ -100,6 +100,24 @@ class DatabaseSeeder extends Seeder
                 'is_active' => true,
                 'is_featured' => false,
                 'sort_order' => 4,
+                'check_endpoint' => null,
+                'create_endpoint' => null,
+                'change_password_endpoint' => null,
+                'required_fields' => [],
+            ]
+        );
+
+        Module::updateOrCreate(
+            ['name' => 'ai'],
+            [
+                'display_name' => 'OPOOBO AI',
+                'description' => 'Ask a question in text and get an answer from the OPOOBO knowledgebase.',
+                'api_base_url' => null,
+                'icon' => 'auto_awesome',
+                'website_url' => 'https://opoobo.com',
+                'is_active' => true,
+                'is_featured' => false,
+                'sort_order' => 5,
                 'check_endpoint' => null,
                 'create_endpoint' => null,
                 'change_password_endpoint' => null,
