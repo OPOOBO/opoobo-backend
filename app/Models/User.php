@@ -20,6 +20,7 @@ class User extends Authenticatable
         'password',
         'avatar_url',
         'membership_tier',
+        'wallet_balance',
         'status',
         'last_login_at',
         'last_login_app',
@@ -37,6 +38,7 @@ class User extends Authenticatable
             'phone_verified_at' => 'datetime',
             'last_login_at' => 'datetime',
             'password' => 'hashed',
+            'wallet_balance' => 'float',
         ];
     }
 
@@ -92,6 +94,11 @@ class User extends Authenticatable
     public function flutterwaveAuthorizations()
     {
         return $this->hasMany(FlutterwaveAuthorization::class);
+    }
+
+    public function walletTransactions()
+    {
+        return $this->hasMany(WalletTransaction::class);
     }
 
     public function getLinkedModulesAttribute()

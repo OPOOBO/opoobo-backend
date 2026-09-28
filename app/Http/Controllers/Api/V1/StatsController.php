@@ -25,7 +25,7 @@ class StatsController extends Controller
                 'member_since' => $user->created_at->toISOString(),
                 'last_login_at' => $user->last_login_at?->toISOString(),
                 'membership_tier' => $user->membership_tier,
-                'wallet_balance' => 0,
+                'wallet_balance' => (float) ($user->wallet_balance ?? 0),
                 'reward_points' => 0,
             ],
         ]);

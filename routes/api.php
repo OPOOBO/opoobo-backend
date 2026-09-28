@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\V1\SecurityController;
 use App\Http\Controllers\Api\V1\StatsController;
 use App\Http\Controllers\Api\V1\StoreController;
 use App\Http\Controllers\Api\V1\UserController;
+use App\Http\Controllers\Api\V1\WalletController;
 use App\Http\Controllers\MiniAppController;
 use Illuminate\Support\Facades\Route;
 
@@ -58,6 +59,8 @@ Route::prefix('v1')->group(function () {
 
         // Dashboard Stats
         Route::get('/user/stats', [StatsController::class, 'index']);
+        Route::post('/wallet/debit', [WalletController::class, 'debit']);
+        Route::post('/wallet/credit', [WalletController::class, 'credit']);
 
         // AI Assistant
         Route::post('/ai/chat', [AiAssistantController::class, 'chat']);
